@@ -13,7 +13,7 @@ Usage:
   python ipod_drop.py --url <URL> --name "My Album" --out ~/Music/iPod
 
 Dependencies:
-  pip install yt-dlp tqdm
+  pip install yt-dlp tqdm mutagen
   brew install ffmpeg   (macOS)
 """
 
@@ -27,9 +27,9 @@ import tempfile
 import time
 import argparse
 from pathlib import Path
-
 import yt_dlp
 from tqdm import tqdm
+from mutagen.mp4 import MP4, MP4Cover
 
 # ─────────────────────────────────────────────────────────────────
 #  FFMPEG / FFPROBE DETECTION
@@ -235,19 +235,30 @@ def download_cover(url: str, stem: str) -> Path | None:
     return None
 
 # ─────────────────────────────────────────────────────────────────
-#  ENCODE TO ITUNES-COMPATIBLE M4A
+#  EMBED METADATA + COVER ART VIA MUTAGEN
 #
-#  iOS 9.3.5 / iPod touch requirements:
-#    - Container : MP4 / M4A  (not WebM / Ogg)
-#    - Codec     : AAC-LC     (not HE-AAC v2 — old hardware decodes it but
-#                              cover art sometimes breaks; LC is safer)
-#    - Bitrate   : 256 kbps   (transparent quality, fast seek)
-#    - Cover art : attached as video stream with disposition=attached_pic
-#                  AND written to the iTunes covr atom via -write_id3v2 isn't
-#                  needed; ffmpeg's mov muxer writes covr automatically.
-#    - Tags      : title / artist / album / track — iTunes-style atoms
-#    - faststart : moov atom at front → playback starts without full download
+#  ffmpeg's ipod muxer never writes a valid covr codec tag — it always
+#  produces [0][0][0][0], which iOS 9 ignores. The correct approach is:
+#    1. ffmpeg encodes audio-only M4A (no video stream at all)
+#    2. mutagen writes all tags + cover art directly into the covr MP4 atom
 # ─────────────────────────────────────────────────────────────────
+
+def _embed_tags(path: Path, title: str, artist: str, album: str,
+                track_num: int, total: int, cover: Path | None) -> None:
+    """Write iTunes-compatible tags and cover art into an M4A using mutagen."""
+    audio = MP4(str(path))
+    if audio.tags is None:
+        audio.add_tags()
+    audio.tags["\xa9nam"] = [title]
+    audio.tags["\xa9ART"] = [artist]
+    audio.tags["\xa9alb"] = [album]
+    audio.tags["trkn"]    = [(track_num, total)]
+    if cover and cover.exists():
+        audio.tags["covr"] = [
+            MP4Cover(cover.read_bytes(), imageformat=MP4Cover.FORMAT_JPEG)
+        ]
+    audio.save()
+
 
 def encode_m4a(
     src: Path,
@@ -262,37 +273,16 @@ def encode_m4a(
 ) -> None:
     duration = get_duration(src)
 
-    cmd = [FFMPEG, "-y", "-i", str(src)]
-    n_inputs = 1
-
-    if cover and cover.exists():
-        cmd += ["-i", str(cover)]
-        n_inputs = 2
-
-    cmd += [
+    # Step 1: encode audio-only — no metadata, no video stream
+    cmd = [
+        FFMPEG, "-y", "-i", str(src),
         "-map", "0:a",
         "-c:a", encoder,
         "-b:a", "256k",
-        "-profile:a", "aac_low",   # AAC-LC — broadest compatibility
-        "-metadata", f"title={title}",
-        "-metadata", f"artist={artist}",
-        "-metadata", f"album={album}",
-        "-metadata", f"track={track_num}/{total}",
-        "-metadata", "comment=ipod-drop",
+        "-profile:a", "aac_low",  # AAC-LC — broadest iOS compatibility
+        "-movflags", "+faststart",
+        str(out),
     ]
-
-    if n_inputs == 2:
-        cmd += [
-            "-map", "1:v",
-            "-c:v", "copy",
-            # iTunes covr atom — the only cover art mechanism iOS 9 reads in M4A
-            "-disposition:v:0", "attached_pic",
-            "-metadata:s:v", "title=Album cover",
-            "-metadata:s:v", "comment=Cover (front)",
-        ]
-
-    # write_id3v2=0 prevents a conflicting ID3 block; movflags writes covr atom
-    cmd += ["-movflags", "+faststart", str(out)]
 
     pbar = tqdm(
         total=max(int(duration), 1),
@@ -321,18 +311,16 @@ def encode_m4a(
     pbar.close()
 
     if proc.returncode != 0:
-        # Fallback: native aac encoder, no cover art
         fallback = [
             FFMPEG, "-y", "-i", str(src),
             "-map", "0:a", "-c:a", "aac", "-b:a", "256k",
             "-profile:a", "aac_low",
-            "-metadata", f"title={title}",
-            "-metadata", f"artist={artist}",
-            "-metadata", f"album={album}",
-            "-metadata", f"track={track_num}/{total}",
             "-movflags", "+faststart", str(out),
         ]
         subprocess.run(fallback, check=True, capture_output=True)
+
+    # Step 2: write tags + covr atom via mutagen
+    _embed_tags(out, title, artist, album, track_num, total, cover)
 
 # ─────────────────────────────────────────────────────────────────
 #  CACHE  (per-output-folder, keyed by YouTube URL)
@@ -359,7 +347,7 @@ def _save_cache(folder: Path, cache: dict) -> None:
 # ─────────────────────────────────────────────────────────────────
 
 def reembed_art(out_dir: Path, cache: dict) -> None:
-    """Re-download cover art and re-mux into every cached M4A in out_dir."""
+    """Re-download cover art and write it into the covr atom of every cached M4A."""
     entries = [(url, e) for url, e in cache.items()
                if (out_dir / e["filename"]).exists()]
 
@@ -370,46 +358,30 @@ def reembed_art(out_dir: Path, cache: dict) -> None:
     print(f"\n🖼️  Re-embedding cover art for {len(entries)} track(s)...\n")
 
     for i, (track_url, entry) in enumerate(entries, 1):
-        m4a = out_dir / entry["filename"]
+        m4a   = out_dir / entry["filename"]
         title = entry["title"]
         print(f"  [{i}/{len(entries)}] {title}")
 
         with tempfile.TemporaryDirectory() as tmp:
-            tmp_path = Path(tmp)
-
             print("    🖼️  Downloading cover art...")
-            cover = download_cover(track_url, str(tmp_path / "thumb"))
+            cover = download_cover(track_url, str(Path(tmp) / "thumb"))
             if not cover:
                 print("    (no cover art found — skipping)")
                 continue
 
-            # Re-mux: copy existing audio stream, replace art
-            tmp_out = tmp_path / "remuxed.m4a"
-            cmd = [
-                FFMPEG, "-y",
-                "-i", str(m4a),
-                "-i", str(cover),
-                "-map", "0:a",
-                "-c:a", "copy",          # never re-encode audio
-                "-map", "1:v",
-                "-c:v", "copy",
-                "-disposition:v:0", "attached_pic",
-                "-metadata:s:v", "title=Album cover",
-                "-metadata:s:v", "comment=Cover (front)",
-                # Carry over all existing metadata tags
-                "-map_metadata", "0",
-                "-movflags", "+faststart",
-                str(tmp_out),
-            ]
-            result = subprocess.run(cmd, capture_output=True)
-            if result.returncode != 0:
-                print(f"    ❌  Failed to remux")
-                continue
-
-            # Atomically replace original
-            tmp_out.replace(m4a)
-            size_mb = m4a.stat().st_size / (1024 * 1024)
-            print(f"    ✅  Done  ({size_mb:.1f} MB)")
+            # Write covr atom directly — no ffmpeg remux needed
+            try:
+                audio = MP4(str(m4a))
+                if audio.tags is None:
+                    audio.add_tags()
+                audio.tags["covr"] = [
+                    MP4Cover(cover.read_bytes(), imageformat=MP4Cover.FORMAT_JPEG)
+                ]
+                audio.save()
+                size_mb = m4a.stat().st_size / (1024 * 1024)
+                print(f"    ✅  Done  ({size_mb:.1f} MB)")
+            except Exception as e:
+                print(f"    ❌  Failed: {e}")
 
     print(f"\n{'═' * 50}")
     print("  Art re-embed complete. Re-sync your iPod in Finder.")
