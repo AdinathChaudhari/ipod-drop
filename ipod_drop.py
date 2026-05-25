@@ -219,12 +219,13 @@ def download_cover(url: str, stem: str) -> Path | None:
         raw = Path(f"{stem}.{ext}")
         if raw.exists():
             jpg = Path(f"{stem}_cover.jpg")
-            # Baseline (non-progressive) JPEG, RGB, max 600 px wide.
-            # iOS 9 covr atom requires baseline JPEG — progressive silently fails.
+            # Crop center-square, scale to 600x600, baseline JPEG.
+            # YouTube thumbnails are 16:9 — iOS 9 may silently reject non-square art.
+            # crop=ih:ih takes a square from the center of the frame.
             subprocess.run(
                 [FFMPEG, "-y", "-i", str(raw),
-                 "-vf", "scale='min(600,iw)':-2",  # -2 keeps height even (mjpeg requirement)
-                 "-pix_fmt", "yuvj420p",            # full-range YUV — widest decoder compat
+                 "-vf", "crop=ih:ih,scale=600:600",
+                 "-pix_fmt", "yuvj420p",
                  "-huffman", "optimal",
                  str(jpg)],
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
@@ -343,52 +344,6 @@ def _save_cache(folder: Path, cache: dict) -> None:
     )
 
 # ─────────────────────────────────────────────────────────────────
-#  RE-EMBED ART INTO EXISTING M4A FILES
-# ─────────────────────────────────────────────────────────────────
-
-def reembed_art(out_dir: Path, cache: dict) -> None:
-    """Re-download cover art and write it into the covr atom of every cached M4A."""
-    entries = [(url, e) for url, e in cache.items()
-               if (out_dir / e["filename"]).exists()]
-
-    if not entries:
-        print("No cached M4A files found in this folder.")
-        return
-
-    print(f"\n🖼️  Re-embedding cover art for {len(entries)} track(s)...\n")
-
-    for i, (track_url, entry) in enumerate(entries, 1):
-        m4a   = out_dir / entry["filename"]
-        title = entry["title"]
-        print(f"  [{i}/{len(entries)}] {title}")
-
-        with tempfile.TemporaryDirectory() as tmp:
-            print("    🖼️  Downloading cover art...")
-            cover = download_cover(track_url, str(Path(tmp) / "thumb"))
-            if not cover:
-                print("    (no cover art found — skipping)")
-                continue
-
-            # Write covr atom directly — no ffmpeg remux needed
-            try:
-                audio = MP4(str(m4a))
-                if audio.tags is None:
-                    audio.add_tags()
-                audio.tags["covr"] = [
-                    MP4Cover(cover.read_bytes(), imageformat=MP4Cover.FORMAT_JPEG)
-                ]
-                audio.save()
-                size_mb = m4a.stat().st_size / (1024 * 1024)
-                print(f"    ✅  Done  ({size_mb:.1f} MB)")
-            except Exception as e:
-                print(f"    ❌  Failed: {e}")
-
-    print(f"\n{'═' * 50}")
-    print("  Art re-embed complete. Re-sync your iPod in Finder.")
-    print(f"{'═' * 50}")
-
-
-# ─────────────────────────────────────────────────────────────────
 #  MAIN
 # ─────────────────────────────────────────────────────────────────
 
@@ -402,8 +357,6 @@ def main():
     parser.add_argument("--browser", help="Browser for cookies (premium/private)",
                         choices=["safari", "chrome", "firefox", "edge", "brave", "opera"])
     parser.add_argument("--no-bell", action="store_true", help="Suppress terminal bell on finish")
-    parser.add_argument("--reembed-art", action="store_true",
-                        help="Re-download cover art and re-mux into existing M4A files (no audio re-download)")
     args = parser.parse_args()
 
     print("╔══════════════════════════════════════════════╗")
@@ -436,19 +389,6 @@ def main():
     encoder, is_hw, enc_desc = _detect_aac_encoder()
     label = "Hardware" if is_hw else "Software"
     print(f"   {label}: {enc_desc}")
-
-    # ── Re-embed art mode ──────────────────────────────────────────────────────
-    if args.reembed_art:
-        folder = Path(args.out) if args.out else Path(input("\nFolder containing the M4A files: ").strip())
-        if not folder.exists():
-            print(f"Folder not found: {folder}")
-            sys.exit(1)
-        cache = _load_cache(folder)
-        if not cache:
-            print("No cache file found. Run a normal download first.")
-            sys.exit(1)
-        reembed_art(folder, cache)
-        return
 
     # ── Source URL ─────────────────────────────────────────────────────────────
     if args.url:
