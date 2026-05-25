@@ -25,13 +25,13 @@ brew install ffmpeg   # macOS
 
 **Interactive:**
 ```bash
-python ipod_sync.py
+python ipod_drop.py
 ```
 
 **With a URL directly:**
 ```bash
-python ipod_sync.py --url "https://youtube.com/playlist?list=..."
-python ipod_sync.py --url "https://youtu.be/dQw4w9WgXcQ"
+python ipod_drop.py --url "https://youtube.com/playlist?list=..."
+python ipod_drop.py --url "https://youtu.be/dQw4w9WgXcQ"
 ```
 
 **All options:**

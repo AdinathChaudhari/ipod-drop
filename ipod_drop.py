@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 
 """
-ipod-sync
+ipod-drop
 ---------
 Downloads songs from YouTube / YouTube Music as iTunes-compatible M4A files
 with embedded cover art and metadata, ready to drag into Finder for iPod Touch
 (iOS 9.3.5) sync.
 
 Usage:
-  python ipod_sync.py                        # interactive
-  python ipod_sync.py --url <URL>            # single video or playlist
-  python ipod_sync.py --url <URL> --name "My Album" --out ~/Music/iPod
+  python ipod_drop.py                        # interactive
+  python ipod_drop.py --url <URL>            # single video or playlist
+  python ipod_drop.py --url <URL> --name "My Album" --out ~/Music/iPod
 
 Dependencies:
   pip install yt-dlp tqdm
@@ -276,7 +276,7 @@ def encode_m4a(
         "-metadata", f"artist={artist}",
         "-metadata", f"album={album}",
         "-metadata", f"track={track_num}/{total}",
-        "-metadata", "comment=ipod-sync",
+        "-metadata", "comment=ipod-drop",
     ]
 
     if n_inputs == 2:
@@ -354,7 +354,7 @@ def _save_cache(folder: Path, cache: dict) -> None:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="iPod Sync — downloads YouTube/YT Music → iTunes-compatible M4A"
+        description="ipod-drop — downloads YouTube/YT Music → iTunes-compatible M4A"
     )
     parser.add_argument("--url",     help="YouTube playlist or video URL")
     parser.add_argument("--name",    help="Album / folder name override")
@@ -365,7 +365,7 @@ def main():
     args = parser.parse_args()
 
     print("╔══════════════════════════════════════════════╗")
-    print("║   🎵  iPod Sync  —  YouTube → M4A           ║")
+    print("║   🎵  ipod-drop  —  YouTube → M4A           ║")
     print("║   Optimised for iPod touch  iOS 9.3.5        ║")
     print("╚══════════════════════════════════════════════╝")
 
