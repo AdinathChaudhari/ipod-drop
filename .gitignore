@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+
+# Downloaded output
+*.m4a
+*.webm
+*.opus
+*.mp4
+*.jpg
+*.jpeg
+*.png
+*.webp
+ipod_drop_cache.json
+
+# macOS
+.DS_Store
+
+# Editor
+.vscode/
+.idea/
