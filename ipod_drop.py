@@ -13,7 +13,7 @@ Usage:
   python ipod_drop.py --url <URL> --name "My Album" --out ~/Music/iPod
 
 Dependencies:
-  pip install yt-dlp tqdm mutagen
+  pip install yt-dlp tqdm mutagen Pillow
   brew install ffmpeg   (macOS)
 """
 
@@ -30,6 +30,8 @@ from pathlib import Path
 import yt_dlp
 from tqdm import tqdm
 from mutagen.mp4 import MP4, MP4Cover
+from PIL import Image
+import io
 
 # ─────────────────────────────────────────────────────────────────
 #  FFMPEG / FFPROBE DETECTION
@@ -218,20 +220,23 @@ def download_cover(url: str, stem: str) -> Path | None:
     for ext in ("jpg", "jpeg", "png", "webp"):
         raw = Path(f"{stem}.{ext}")
         if raw.exists():
-            jpg = Path(f"{stem}_cover.jpg")
-            # Crop center-square, scale to 600x600, baseline JPEG.
-            # YouTube thumbnails are 16:9 — iOS 9 may silently reject non-square art.
-            # crop=ih:ih takes a square from the center of the frame.
-            subprocess.run(
-                [FFMPEG, "-y", "-i", str(raw),
-                 "-vf", "crop=ih:ih,scale=600:600",
-                 "-pix_fmt", "yuvj420p",
-                 "-huffman", "optimal",
-                 str(jpg)],
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-            )
-            raw.unlink(missing_ok=True)
-            return jpg if jpg.exists() else None
+            try:
+                img = Image.open(raw).convert("RGB")
+                # Crop to center square (YouTube thumbnails are 16:9)
+                w, h = img.size
+                side = min(w, h)
+                left = (w - side) // 2
+                top  = (h - side) // 2
+                img  = img.crop((left, top, left + side, top + side))
+                img  = img.resize((600, 600), Image.LANCZOS)
+                jpg  = Path(f"{stem}_cover.jpg")
+                # Save as plain sRGB baseline JPEG — iTunes rejects yuvj420p full-range
+                img.save(str(jpg), format="JPEG", quality=90, subsampling=0)
+                raw.unlink(missing_ok=True)
+                return jpg
+            except Exception:
+                raw.unlink(missing_ok=True)
+                return None
 
     return None
 
@@ -255,9 +260,10 @@ def _embed_tags(path: Path, title: str, artist: str, album: str,
     audio.tags["\xa9alb"] = [album]
     audio.tags["trkn"]    = [(track_num, total)]
     if cover and cover.exists():
-        audio.tags["covr"] = [
-            MP4Cover(cover.read_bytes(), imageformat=MP4Cover.FORMAT_JPEG)
-        ]
+        # Re-encode through Pillow to guarantee clean sRGB JPEG — no yuvj420p/full-range
+        buf = io.BytesIO()
+        Image.open(cover).convert("RGB").save(buf, format="JPEG", quality=90, subsampling=0)
+        audio.tags["covr"] = [MP4Cover(buf.getvalue(), imageformat=MP4Cover.FORMAT_JPEG)]
     audio.save()
 
 
