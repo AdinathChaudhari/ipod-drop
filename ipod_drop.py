@@ -219,11 +219,13 @@ def download_cover(url: str, stem: str) -> Path | None:
         raw = Path(f"{stem}.{ext}")
         if raw.exists():
             jpg = Path(f"{stem}_cover.jpg")
-            # Convert to plain JPEG — iOS 9 is strict about embedded image format
+            # Baseline (non-progressive) JPEG, RGB, max 600 px wide.
+            # iOS 9 covr atom requires baseline JPEG — progressive silently fails.
             subprocess.run(
                 [FFMPEG, "-y", "-i", str(raw),
-                 "-vf", "scale='min(600,iw)':-1",   # cap at 600 px (saves space, still sharp on Retina)
-                 "-q:v", "2",                         # high quality JPEG
+                 "-vf", "scale='min(600,iw)':-2",  # -2 keeps height even (mjpeg requirement)
+                 "-pix_fmt", "yuvj420p",            # full-range YUV — widest decoder compat
+                 "-huffman", "optimal",
                  str(jpg)],
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
             )
@@ -282,10 +284,14 @@ def encode_m4a(
     if n_inputs == 2:
         cmd += [
             "-map", "1:v",
-            "-c:v", "mjpeg",
+            "-c:v", "copy",
+            # iTunes covr atom — the only cover art mechanism iOS 9 reads in M4A
             "-disposition:v:0", "attached_pic",
+            "-metadata:s:v", "title=Album cover",
+            "-metadata:s:v", "comment=Cover (front)",
         ]
 
+    # write_id3v2=0 prevents a conflicting ID3 block; movflags writes covr atom
     cmd += ["-movflags", "+faststart", str(out)]
 
     pbar = tqdm(
