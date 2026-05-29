@@ -249,7 +249,7 @@ def download_cover(url: str, stem: str) -> Path | None:
 #    2. mutagen writes all tags + cover art directly into the covr MP4 atom
 # ─────────────────────────────────────────────────────────────────
 
-def _embed_tags(path: Path, title: str, artist: str, album: str,
+def _embed_tags(path: Path, title: str, artist: str, album: str, album_artist: str,
                 track_num: int, total: int, cover: Path | None) -> None:
     """Write iTunes-compatible tags and cover art into an M4A using mutagen."""
     audio = MP4(str(path))
@@ -258,6 +258,7 @@ def _embed_tags(path: Path, title: str, artist: str, album: str,
     audio.tags["\xa9nam"] = [title]
     audio.tags["\xa9ART"] = [artist]
     audio.tags["\xa9alb"] = [album]
+    audio.tags["aART"]    = [album_artist]
     audio.tags["trkn"]    = [(track_num, total)]
     if cover and cover.exists():
         # Re-encode through Pillow to guarantee clean sRGB JPEG — no yuvj420p/full-range
@@ -274,6 +275,7 @@ def encode_m4a(
     title: str,
     artist: str,
     album: str,
+    album_artist: str,
     track_num: int,
     total: int,
     cover: Path | None,
@@ -327,7 +329,7 @@ def encode_m4a(
         subprocess.run(fallback, check=True, capture_output=True)
 
     # Step 2: write tags + covr atom via mutagen
-    _embed_tags(out, title, artist, album, track_num, total, cover)
+    _embed_tags(out, title, artist, album, album_artist, track_num, total, cover)
 
 # ─────────────────────────────────────────────────────────────────
 #  CACHE  (per-output-folder, keyed by YouTube URL)
@@ -512,6 +514,7 @@ def main():
                     title=t_title,
                     artist=t_artist,
                     album=album_name,
+                    album_artist=f"Aey - {album_name}",
                     track_num=idx,
                     total=total,
                     cover=cover,
