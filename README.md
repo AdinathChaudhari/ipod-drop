@@ -1,78 +1,15 @@
 # ipod-drop
 
-Download songs from YouTube and YouTube Music as iTunes-compatible M4A files, ready to sync to an iPod touch via Finder.
+> **This repository is archived.** All features have been merged into [streamlist](https://github.com/AdinathChaudhari/streamlist), which works for Apple Music, modern iOS, and iPod sync via Finder. Use that instead.
 
-Built specifically for **iPod touch running iOS 9.3.5** — AAC-LC encoding, embedded cover art, and proper iTunes metadata atoms so everything shows up correctly in the Music app.
+---
 
-## Features
+ipod-drop was a downloader for YouTube / YouTube Music built specifically for **iPod touch running iOS 9.3.5** — it used mutagen to write iTunes-compatible `covr` atoms because ffmpeg's iPod muxer produces a malformed tag that iOS 9 ignores.
 
-- Downloads single videos or full playlists
-- Embeds cover art (thumbnail → JPEG → iTunes `covr` atom)
-- Full metadata: title, artist, album, track number
-- Smart caching — skips already-downloaded tracks on re-runs
-- Auto-retry on failure (failed tracks not cached)
-- Best AAC encoder auto-detected: Apple AudioToolbox → FDK → native fallback
-- Cookie support for YouTube Premium and private playlists
+The following features were ported to streamlist before archiving:
 
-## Requirements
+- Square cover art crop (600×600 sRGB JPEG via Pillow)
+- `album_artist` tag for Apple Music grouping
+- `creator` field in the artist resolution fallback chain
 
-```bash
-pip install yt-dlp tqdm
-brew install ffmpeg   # macOS
-```
-
-## Usage
-
-**Interactive:**
-```bash
-python ipod_drop.py
-```
-
-**With a URL directly:**
-```bash
-python ipod_drop.py --url "https://youtube.com/playlist?list=..."
-python ipod_drop.py --url "https://youtu.be/dQw4w9WgXcQ"
-```
-
-**All options:**
-```
---url URL        YouTube playlist or video URL
---name NAME      Album / folder name override
---out DIR        Output directory (default: current dir)
---browser        Browser for cookies: safari, chrome, firefox, edge, brave, opera
---no-bell        Suppress the terminal bell on finish
-```
-
-## Syncing to iPod touch
-
-> **Important:** iOS's Music app never reads cover art from the audio file itself. It reads from a device-side artwork database that iTunes populates during sync. You must go through iTunes — not just Finder drag-and-drop — for cover art to appear.
-
-1. Open **iTunes** on your Mac and drag the output folder into your library
-2. Select all the imported tracks → right-click → **Get Info** → **Artwork** tab
-3. If artwork is missing, drag the cover JPEG (or any image) in and click OK — this registers it in iTunes's own database
-4. Connect your iPod touch via USB
-5. In iTunes, go to the **Music** sync tab for your device
-6. Sync — iTunes will push the artwork into the iPod's artwork database
-
-**If art still doesn't show after sync:**
-- In iTunes, go to the Music sync tab → uncheck Sync Music → sync (removes all music) → re-check → sync again. This rebuilds the artwork database from scratch.
-- Delete `~/Music/iTunes/Album Artwork/` and relaunch iTunes to force it to re-read all embedded art.
-
-## Output
-
-Each track is saved as:
-```
-Album Name/
-  01 - Song Title.m4a
-  02 - Song Title.m4a
-  ...
-  ipod_drop_cache.json   ← resume cache, safe to delete
-```
-
-## Notes
-
-- AAC-LC profile is used (not HE-AAC v2) for broadest compatibility with old iOS hardware
-- Cover art is cropped to a 600×600 center square (YouTube thumbnails are 16:9) and saved as clean sRGB JPEG via Pillow — iTunes rejects full-range YUV JPEGs silently
-- `moov` atom is placed at the front of each file (`faststart`) for instant playback
-- The cache is keyed by YouTube URL, so re-running the script on the same output folder safely skips completed tracks
-- iOS's Music app reads artwork from `ArtworkDB` on the device, not from the embedded `covr` atom — this is why art shows on macOS but not on the iPod until properly synced through iTunes
+streamlist proved to work perfectly with Apple Music sync, including correct cover art display — making a separate iPod-specific tool unnecessary.
